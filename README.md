@@ -114,6 +114,8 @@ uv run python -m whc train \
 --device auto \
 --use_amp
 
+SIZE=32x32
+VAR=s
 uv run python -m whc train \
 --data_root data/dataset.parquet \
 --output_dir runs/whc_seq_3dcnn_32x32 \
@@ -131,6 +133,8 @@ uv run python -m whc train \
 --use_sequence 3dcnn \
 --sequence_len 4
 
+SIZE=32x32
+VAR=s
 uv run python -m whc train \
 --data_root data/dataset.parquet \
 --output_dir runs/whc_seq_lstm_32x32 \
