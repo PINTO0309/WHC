@@ -841,7 +841,7 @@ class WHC(AbstractModel):
         self,
         *,
         runtime: Optional[str] = 'onnx',
-        model_path: Optional[str] = 'whc_m_32x32.onnx',
+        model_path: Optional[str] = 'whc_seq_3dcnn_4x32x32.onnx',
         providers: Optional[List] = None,
     ):
         super().__init__(
@@ -1156,7 +1156,7 @@ def main():
         '-wm',
         '--whc_model',
         type=str,
-        default='whc_m_32x32.onnx',
+        default='whc_seq_3dcnn_4x32x32.onnx',
         help='ONNX file path for the WHC waving-hand classifier.',
     )
     group_v_or_i = parser.add_mutually_exclusive_group(required=True)
