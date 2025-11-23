@@ -47,10 +47,10 @@ uv run python demo_whc.py \
 ## Dataset Preparation
 
 ```bash
-uv run python 01_build_smile_parquet.py
+uv run python 01_data_prep_realdata.py
 ```
 
-<img width="400" alt="class_composition_pie" src="https://github.com/user-attachments/assets/b0db4a3d-a737-4998-be6b-3b6668054ff1" />
+<img width="400" alt="class_distribution" src="https://github.com/user-attachments/assets/7eade7cc-3d2c-416d-9079-cb18c0a5d10e" />
 
 ## Training Pipeline
 
