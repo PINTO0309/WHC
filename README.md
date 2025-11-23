@@ -50,7 +50,7 @@ uv run python demo_whc.py \
 uv run python 01_data_prep_realdata.py
 ```
 
-<img width="400" alt="class_distribution" src="https://github.com/user-attachments/assets/7eade7cc-3d2c-416d-9079-cb18c0a5d10e" />
+<img width="700" alt="class_distribution" src="https://github.com/user-attachments/assets/7eade7cc-3d2c-416d-9079-cb18c0a5d10e" />
 
 ## Training Pipeline
 
