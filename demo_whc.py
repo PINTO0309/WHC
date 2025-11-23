@@ -49,8 +49,8 @@ EDGES = [
     (31, 32), (31, 32),  # knee -> ankle (left and right)
 ]
 
-BODY_LONG_HISTORY_SIZE = 10
-BODY_SHORT_HISTORY_SIZE = 6
+BODY_LONG_HISTORY_SIZE = 8
+BODY_SHORT_HISTORY_SIZE = 5
 WAVING_LABEL = '!! Waving !!'
 WAVING_COLOR = (0, 210, 0)  # readable green for waving label/bounding boxes
 
@@ -860,16 +860,25 @@ class WHC(AbstractModel):
             if len(input_shape) == 5:
                 if input_shape[1] in (3, None):
                     self.sequence_mode = "3dcnn"  # (N, C, T, H, W)
-                    if isinstance(input_shape[2], int) and input_shape[2] > 0:
-                        self.sequence_len = int(input_shape[2])
+                    try:
+                        seq_val = int(input_shape[2])
+                        if seq_val > 0:
+                            self.sequence_len = seq_val
+                    except Exception:
+                        pass
                 elif input_shape[2] in (3, None):
                     self.sequence_mode = "lstm"  # (N, T, C, H, W)
-                    if isinstance(input_shape[1], int) and input_shape[1] > 0:
-                        self.sequence_len = int(input_shape[1])
+                    try:
+                        seq_val = int(input_shape[1])
+                        if seq_val > 0:
+                            self.sequence_len = seq_val
+                    except Exception:
+                        pass
         except Exception:
             self.sequence_mode = "2d"
-        if self.sequence_len <= 0:
-            self.sequence_len = 1
+        if self.sequence_mode != "2d" and self.sequence_len <= 1:
+            # Fall back to a small reasonable window for sequence models.
+            self.sequence_len = 4
 
     def _resolve_input_size(self) -> Tuple[int, int]:
         default_height, default_width = 32, 32
@@ -1520,6 +1529,8 @@ def main():
         elapsed_time = time.perf_counter() - start_time
         body_boxes = [box for box in boxes if box.classid == 0]
         hand_boxes = [box for box in boxes if box.classid == 26]
+        # Assign stable track IDs to hands before classification so left/right remain independent.
+        hand_tracker.update(hand_boxes)
         target_boxes = hand_boxes
         for box in target_boxes:
             box.hand_prob_waving = -1.0
