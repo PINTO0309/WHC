@@ -114,44 +114,44 @@ uv run python -m whc train \
 --device auto \
 --use_amp
 
-SEQ=6
+3DCNN:
+
+```bash
+SEQ=4
 SIZE=32x32
-VAR=l
 uv run python -m whc train \
 --data_root data/dataset.parquet \
---output_dir runs/whc_seq_3dcnn_${VAR}_${SEQ}x${SIZE} \
+--output_dir runs/whc_seq_3dcnn_${SEQ}x${SIZE} \
 --epochs 100 \
 --batch_size 256 \
 --train_resampling balanced \
 --image_size ${SIZE} \
 --base_channels 32 \
---num_blocks 8 \
---arch_variant inverted_se \
---head_variant avgmax_mlp \
 --seed 42 \
 --device auto \
 --use_amp \
 --use_sequence 3dcnn \
 --sequence_len ${SEQ}
+```
 
+LSTM:
+
+```bash
+SEQ=4
 SIZE=32x32
-VAR=s
 uv run python -m whc train \
 --data_root data/dataset.parquet \
---output_dir runs/whc_seq_lstm_32x32 \
+--output_dir runs/whc_seq_lstm_${SEQ}x${SIZE} \
 --epochs 100 \
 --batch_size 256 \
 --train_resampling balanced \
 --image_size 32x32 \
 --base_channels 32 \
---num_blocks 4 \
---arch_variant inverted_se \
---head_variant avgmax_mlp \
 --seed 42 \
 --device auto \
 --use_amp \
 --use_sequence lstm \
---sequence_len 4
+--sequence_len ${SEQ}
 ```
 
 ConvNeXt-style backbone with transformer head over pooled tokens:
