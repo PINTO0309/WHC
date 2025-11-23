@@ -483,30 +483,29 @@ def _set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def _build_transforms(image_size: Any, mean: Sequence[float], std: Sequence[float]):
+def _build_transforms(image_size: Any, mean: Sequence[float], std: Sequence[float], include_flip: bool = True):
     height, width = _ensure_image_size_tuple(image_size)
-    train_transform = transforms.Compose(
-        [
-            transforms.Resize((height, width)),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomApply(
-                [
-                    transforms.RandomAffine(
-                        degrees=0,
-                        translate=(0.05, 0.05),
-                        scale=(0.9, 1.1),
-                        fill=0,
-                    )
-                ],
-                p=0.4,
-            ),
-            transforms_v2.RandomPhotometricDistort(p=0.5),
-            RandomCLAHE(p=0.01, tile_grid_size=(4, 4)),
-            # transforms.RandomGrayscale(p=0.01),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean, std=std),
-        ]
-    )
+    train_transforms = [
+        transforms.Resize((height, width)),
+        transforms.RandomHorizontalFlip(p=0.5) if include_flip else transforms.Lambda(lambda x: x),
+        transforms.RandomApply(
+            [
+                transforms.RandomAffine(
+                    degrees=0,
+                    translate=(0.05, 0.05),
+                    scale=(0.9, 1.1),
+                    fill=0,
+                )
+            ],
+            p=0.4,
+        ),
+        transforms_v2.RandomPhotometricDistort(p=0.5),
+        RandomCLAHE(p=0.01, tile_grid_size=(4, 4)),
+        # transforms.RandomGrayscale(p=0.01),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean, std=std),
+    ]
+    train_transform = transforms.Compose(train_transforms)
     eval_transform = transforms.Compose(
         [
             transforms.Resize((height, width)),
@@ -809,7 +808,8 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
         }
 
     mean, std = DEFAULT_MEAN, DEFAULT_STD
-    train_transform, eval_transform = _build_transforms(config.image_size, mean, std)
+    include_flip = not use_sequence
+    train_transform, eval_transform = _build_transforms(config.image_size, mean, std, include_flip=include_flip)
     normalization = {"mean": list(mean), "std": list(std), "image_size": list(config.image_size)}
 
     train_samples = list(splits["train"])
@@ -840,9 +840,9 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
         raise ValueError(f"Unsupported train_resampling value: {config.train_resampling!r}")
 
     if use_sequence:
-        train_dataset = SequenceDataset(train_samples, transform=train_transform)
-        val_dataset = SequenceDataset(splits["val"], transform=eval_transform) if splits["val"] else None
-        test_dataset = SequenceDataset(splits["test"], transform=eval_transform) if splits["test"] else None
+        train_dataset = SequenceDataset(train_samples, transform=train_transform, flip_prob=0.5)
+        val_dataset = SequenceDataset(splits["val"], transform=eval_transform, flip_prob=0.0) if splits["val"] else None
+        test_dataset = SequenceDataset(splits["test"], transform=eval_transform, flip_prob=0.0) if splits["test"] else None
     else:
         train_dataset = WHCDataset(train_samples, transform=train_transform)
         val_dataset = WHCDataset(splits["val"], transform=eval_transform) if splits["val"] else None

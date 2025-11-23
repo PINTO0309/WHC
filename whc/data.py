@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import logging
 import math
+import random
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,7 @@ import pandas as pd
 import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
+from torchvision.transforms import functional as TF
 
 DEFAULT_MEAN = [0.0, 0.0, 0.0]
 DEFAULT_STD = [1.0, 1.0, 1.0]
@@ -278,9 +280,10 @@ def build_sequences(samples: Sequence[Sample], sequence_len: int) -> Dict[str, L
 class SequenceDataset(Dataset):
     """Dataset that returns a stack of T frames as a single sample."""
 
-    def __init__(self, sequences: Sequence[SequenceSample], transform=None) -> None:
+    def __init__(self, sequences: Sequence[SequenceSample], transform=None, flip_prob: float = 0.0) -> None:
         self.sequences = list(sequences)
         self.transform = transform
+        self.flip_prob = float(max(0.0, flip_prob))
 
     def __len__(self) -> int:
         return len(self.sequences)
@@ -288,6 +291,7 @@ class SequenceDataset(Dataset):
     def __getitem__(self, index: int):
         seq = self.sequences[index]
         images = []
+        flip = self.flip_prob > 0.0 and random.random() < self.flip_prob
         for frame in seq.frames:
             if frame.image_bytes is not None:
                 img = Image.open(io.BytesIO(frame.image_bytes)).convert("RGB")
@@ -295,6 +299,8 @@ class SequenceDataset(Dataset):
                 img = Image.open(frame.resolved_path).convert("RGB")
             else:
                 raise FileNotFoundError(f"Image file not found for sequence frame {frame.path!r}.")
+            if flip:
+                img = TF.hflip(img)
             if self.transform is not None:
                 img = self.transform(img)
             images.append(img)

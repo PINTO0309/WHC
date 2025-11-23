@@ -116,19 +116,15 @@ def detect_hand_box(
     detections = _run_detector(session, input_name, frame)
     best_det = None
     best_score = HAND_THRESHOLD
-    hand_count = 0
     for det in detections:
         label = int(round(det[0]))
         score = float(det[5])
         if label != HAND_LABEL or score < HAND_THRESHOLD:
             continue
-        hand_count += 1
         if score >= best_score:
             best_score = score
             best_det = det
-        if hand_count >= 2:
-            return None  # Skip frames with multiple detected hands.
-    if best_det is None or hand_count != 1:
+    if best_det is None:
         return None
     return float(best_det[1]), float(best_det[2]), float(best_det[3]), float(best_det[4])
 
@@ -226,7 +222,7 @@ def process_video(
 
     frame_index = 0
     saved_per_split = {"train": 0, "validation": 0}
-    video_prefix = derive_prefix(video_path.stem)
+    video_prefix = video_path.stem  # keep per-file uniqueness to avoid collisions
     while True:
         ret, frame = capture.read()
         if not ret:
