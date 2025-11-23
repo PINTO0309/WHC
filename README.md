@@ -34,13 +34,13 @@ source .venv/bin/activate
 
 ```bash
 uv run python demo_whc.py \
--hm whc_l_32x32.onnx \
+-hm whc_m_32x32.onnx \
 -v 0 \
 -ep cuda \
 -dlr -dnm -dgm -dhm -dhd
 
 uv run python demo_whc.py \
--hm whc_l_32x32.onnx \
+-hm whc_m_32x32.onnx \
 -v 0 \
 -ep tensorrt \
 -dlr -dnm -dgm -dhm -dhd
