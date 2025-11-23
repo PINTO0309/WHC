@@ -1415,7 +1415,13 @@ def export_to_onnx(
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
     model_config = ModelConfig(**checkpoint["model_config"])
-    model = WHC(model_config).to(device)
+    use_sequence = getattr(model_config, "use_sequence", None)
+    if use_sequence == "lstm":
+        model = SequenceLSTM(model_config).to(device)
+    elif use_sequence == "3dcnn":
+        model = Sequence3DCNN(model_config).to(device)
+    else:
+        model = WHC(model_config).to(device)
     model.load_state_dict(checkpoint["model_state"])
     model.eval()
 
@@ -1427,7 +1433,14 @@ def export_to_onnx(
         LOGGER.warning("Invalid image_size %s in checkpoint; defaulting to 112x112.", image_size_raw)
         image_size = (112, 112)
 
-    dummy = torch.randn(1, 3, image_size[0], image_size[1], device=device)
+    if use_sequence == "3dcnn":
+        seq_len = max(2, int(getattr(model_config, "sequence_len", 4)))
+        dummy = torch.randn(1, 3, seq_len, image_size[0], image_size[1], device=device)
+    elif use_sequence == "lstm":
+        seq_len = max(2, int(getattr(model_config, "sequence_len", 4)))
+        dummy = torch.randn(1, seq_len, 3, image_size[0], image_size[1], device=device)
+    else:
+        dummy = torch.randn(1, 3, image_size[0], image_size[1], device=device)
 
     class _ONNXProbWrapper(nn.Module):
         def __init__(self, base_model: nn.Module) -> None:
@@ -1443,13 +1456,18 @@ def export_to_onnx(
     export_base.eval()
     export_model = _ONNXProbWrapper(export_base)
 
+    input_name = "images"
+    output_name = "prob_waving_hand"
+    dynamic_axes = {input_name: {0: "batch"}, output_name: {0: "batch"}}
+    if use_sequence in ("lstm", "3dcnn"):
+        dynamic_axes[input_name][1] = "sequence" if use_sequence == "lstm" else "channels_or_seq"
     torch.onnx.export(
         export_model,
         dummy,
         output_path,
-        input_names=["images"],
-        output_names=["prob_waving_hand"],
-        dynamic_axes={"images": {0: "batch"}, "prob_waving_hand": {0: "batch"}},
+        input_names=[input_name],
+        output_names=[output_name],
+        dynamic_axes=dynamic_axes,
         opset_version=opset,
     )
     LOGGER.info("Exported ONNX model to %s", output_path)

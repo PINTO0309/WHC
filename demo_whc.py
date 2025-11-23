@@ -853,6 +853,23 @@ class WHC(AbstractModel):
             providers=providers,
         )
         self._input_height, self._input_width = self._resolve_input_size()
+        self.sequence_mode: str = "2d"  # one of: 2d, lstm, 3dcnn
+        self.sequence_len: int = 1
+        try:
+            input_shape = list(self._interpreter.get_inputs()[0].shape)
+            if len(input_shape) == 5:
+                if input_shape[1] in (3, None):
+                    self.sequence_mode = "3dcnn"  # (N, C, T, H, W)
+                    if isinstance(input_shape[2], int) and input_shape[2] > 0:
+                        self.sequence_len = int(input_shape[2])
+                elif input_shape[2] in (3, None):
+                    self.sequence_mode = "lstm"  # (N, T, C, H, W)
+                    if isinstance(input_shape[1], int) and input_shape[1] > 0:
+                        self.sequence_len = int(input_shape[1])
+        except Exception:
+            self.sequence_mode = "2d"
+        if self.sequence_len <= 0:
+            self.sequence_len = 1
 
     def _resolve_input_size(self) -> Tuple[int, int]:
         default_height, default_width = 32, 32
@@ -879,11 +896,26 @@ class WHC(AbstractModel):
         width = _safe_dim(input_shape[self._w_index], default_width)
         return height, width
 
-    def __call__(self, image: np.ndarray) -> float:
-        if image is None or image.size == 0:
+    def __call__(self, image: Any) -> float:
+        if image is None:
             raise ValueError('Input image for WHC is empty.')
-        resized_image = self._preprocess(image=image)
-        inference_image = np.asarray([resized_image], dtype=self._input_dtypes[0])
+        if self.sequence_mode == "2d":
+            if image.size == 0:
+                raise ValueError('Input image for WHC is empty.')
+            resized_image = self._preprocess(image=image)
+            inference_image = np.asarray([resized_image], dtype=self._input_dtypes[0])
+        else:
+            frames = image if isinstance(image, (list, tuple)) else [image]
+            frames = frames[-self.sequence_len :]
+            processed = [self._preprocess(frame) for frame in frames if frame is not None and frame.size > 0]
+            if len(processed) < self.sequence_len:
+                raise ValueError('Insufficient frames for sequence WHC inference.')
+            stacked = np.stack(processed, axis=0)  # (T, C, H, W)
+            if self.sequence_mode == "3dcnn":
+                stacked = stacked.transpose(1, 0, 2, 3)  # (C, T, H, W)
+                inference_image = np.asarray([stacked], dtype=self._input_dtypes[0])  # (N, C, T, H, W)
+            else:
+                inference_image = np.asarray([stacked], dtype=self._input_dtypes[0])  # (N, T, C, H, W)
         outputs = super().__call__(input_datas=[inference_image])
         prob_waving = float(np.squeeze(outputs[0]))
         return float(np.clip(prob_waving, 0.0, 1.0))
@@ -1449,6 +1481,7 @@ def main():
     tracker = SimpleSortTracker()
     sitting_tracker = SimpleSortTracker()
     hand_tracker = SimpleSortTracker()
+    sequence_buffers: Dict[int, Deque[np.ndarray]] = {}
     track_color_cache: Dict[int, np.ndarray] = {}
     state_histories: Dict[int, BodyStateHistory] = {}
     def get_state_history(track_id: int) -> BodyStateHistory:
@@ -1504,11 +1537,22 @@ def main():
                 continue
             rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
             try:
-                prob_waving = whc_classifier(image=rgb_crop)
+                if whc_classifier.sequence_mode == "2d":
+                    prob_waving = whc_classifier(image=rgb_crop)
+                else:
+                    track_key = box.track_id if box.track_id > 0 else -1
+                    buf = sequence_buffers.get(track_key)
+                    if buf is None:
+                        buf = deque(maxlen=whc_classifier.sequence_len)
+                        sequence_buffers[track_key] = buf
+                    buf.append(rgb_crop)
+                    if len(buf) < whc_classifier.sequence_len:
+                        continue
+                    prob_waving = whc_classifier(image=list(buf))
+                box.hand_prob_waving = prob_waving
+                box.hand_state = 1 if prob_waving >= 0.50 else 0
             except Exception:
                 continue
-            box.hand_prob_waving = prob_waving
-            box.hand_state = 1 if prob_waving >= 0.50 else 0
 
         sitting_tracker.update(body_boxes)
         hand_tracker.update(hand_boxes)
@@ -1561,6 +1605,10 @@ def main():
         stale_history_ids = [track_id for track_id in list(state_histories.keys()) if track_id not in current_state_track_ids]
         for track_id in stale_history_ids:
             state_histories.pop(track_id, None)
+        # Clean sequence buffers for dropped tracks
+        stale_seq_ids = [tid for tid in list(sequence_buffers.keys()) if tid not in current_state_track_ids and tid != -1]
+        for tid in stale_seq_ids:
+            sequence_buffers.pop(tid, None)
 
         if file_paths is None:
             cv2.putText(debug_image, f'{elapsed_time*1000:.2f} ms', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
