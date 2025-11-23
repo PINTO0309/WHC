@@ -33,13 +33,15 @@ from .data import (
     DEFAULT_MEAN,
     DEFAULT_STD,
     WHCDataset,
+    SequenceDataset,
+    build_sequences,
     build_weighted_sampler,
     collect_samples,
     create_dataloader,
     oversample_samples,
     split_samples,
 )
-from .model import WHC, HSC, ModelConfig
+from .model import WHC, HSC, ModelConfig, Sequence3DCNN, SequenceLSTM
 
 LOGGER = logging.getLogger("whc")
 
@@ -342,6 +344,8 @@ class TrainConfig:
     device: str = "auto"
     resume_from: Optional[Path] = None
     use_amp: bool = False
+    use_sequence: Optional[str] = None  # None, "lstm", or "3dcnn"
+    sequence_len: int = 1
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -551,6 +555,7 @@ def _run_epoch(
     autocast_enabled: bool = False,
     progress_desc: Optional[str] = None,
     collect_outputs: bool = False,
+    sequence_mode: Optional[str] = None,
 ) -> Tuple[Dict[str, float], Optional[Dict[str, np.ndarray]]]:
     if dataloader is None or len(dataloader.dataset) == 0:
         empty_metrics = {
@@ -574,7 +579,10 @@ def _run_epoch(
         iterator = tqdm(iterator, desc=progress_desc, leave=False, dynamic_ncols=True)
 
     for batch in iterator:
-        images = batch["image"].to(device, non_blocking=True)
+        images = batch["image"]
+        if sequence_mode == "3dcnn":
+            images = images.permute(0, 2, 1, 3, 4)  # (B, C, T, H, W)
+        images = images.to(device, non_blocking=True)
         labels = batch["label"].to(device, non_blocking=True)
 
         if train_mode:
@@ -726,12 +734,20 @@ def _save_epoch_diagnostics(
     plt.close(roc_fig)
 
 
-def _evaluate_predictions(model: nn.Module, dataloader: DataLoader, device: torch.device) -> List[Dict[str, Any]]:
+def _evaluate_predictions(
+    model: nn.Module,
+    dataloader: DataLoader,
+    device: torch.device,
+    sequence_mode: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     model.eval()
     results: List[Dict[str, Any]] = []
     with torch.no_grad():
         for batch in dataloader:
-            images = batch["image"].to(device, non_blocking=True)
+            images = batch["image"]
+            if sequence_mode == "3dcnn":
+                images = images.permute(0, 2, 1, 3, 4)
+            images = images.to(device, non_blocking=True)
             logits = model(images)
             probs = torch.sigmoid(logits)
             for idx in range(images.size(0)):
@@ -783,6 +799,14 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
         seed=config.seed,
         logger=LOGGER,
     )
+    use_sequence = config.use_sequence
+    if use_sequence:
+        sequences = build_sequences(samples, sequence_len=config.sequence_len)
+        splits = {
+            "train": sequences["train"],
+            "val": sequences["val"],
+            "test": sequences["test"],
+        }
 
     mean, std = DEFAULT_MEAN, DEFAULT_STD
     train_transform, eval_transform = _build_transforms(config.image_size, mean, std)
@@ -815,9 +839,14 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
     elif config.train_resampling != "none":
         raise ValueError(f"Unsupported train_resampling value: {config.train_resampling!r}")
 
-    train_dataset = WHCDataset(train_samples, transform=train_transform)
-    val_dataset = WHCDataset(splits["val"], transform=eval_transform) if splits["val"] else None
-    test_dataset = WHCDataset(splits["test"], transform=eval_transform) if splits["test"] else None
+    if use_sequence:
+        train_dataset = SequenceDataset(train_samples, transform=train_transform)
+        val_dataset = SequenceDataset(splits["val"], transform=eval_transform) if splits["val"] else None
+        test_dataset = SequenceDataset(splits["test"], transform=eval_transform) if splits["test"] else None
+    else:
+        train_dataset = WHCDataset(train_samples, transform=train_transform)
+        val_dataset = WHCDataset(splits["val"], transform=eval_transform) if splits["val"] else None
+        test_dataset = WHCDataset(splits["test"], transform=eval_transform) if splits["test"] else None
 
     train_loader = create_dataloader(
         train_dataset,
@@ -851,8 +880,15 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
         rgb_to_yuv_to_y=config.rgb_to_yuv_to_y,
         rgb_to_lab=config.rgb_to_lab,
         rgb_to_luv=config.rgb_to_luv,
+        use_sequence=config.use_sequence,
+        sequence_len=config.sequence_len,
     )
-    model = WHC(model_config).to(device)
+    if use_sequence == "lstm":
+        model = SequenceLSTM(model_config).to(device)
+    elif use_sequence == "3dcnn":
+        model = Sequence3DCNN(model_config).to(device)
+    else:
+        model = WHC(model_config).to(device)
     base_metadata = {
         "model_config": asdict(model_config),
         "train_config": train_config_serialized,
@@ -986,6 +1022,7 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
             autocast_enabled=amp_enabled,
             progress_desc=f"Train {epoch}/{config.epochs}",
             collect_outputs=True,
+            sequence_mode=config.use_sequence,
         )
         if val_loader:
             val_metrics, val_outputs = _run_epoch(
@@ -998,6 +1035,7 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
                 autocast_enabled=amp_enabled,
                 progress_desc=f"Val   {epoch}/{config.epochs}",
                 collect_outputs=True,
+                sequence_mode=config.use_sequence,
             )
         else:
             val_metrics, val_outputs = None, None
@@ -1116,6 +1154,7 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
             scaler=None,
             autocast_enabled=amp_enabled,
             progress_desc="Test",
+            sequence_mode=config.use_sequence,
         )
     LOGGER.info("Test metrics: %s", json.dumps(test_metrics, indent=2) if test_metrics else "n/a")
     if test_metrics:
@@ -1129,7 +1168,7 @@ def train_pipeline(config: TrainConfig, verbose: bool = False) -> Dict[str, Any]
         json.dump(history, fp, indent=2)
 
     if test_loader:
-        predictions = _evaluate_predictions(model, test_loader, device)
+        predictions = _evaluate_predictions(model, test_loader, device, sequence_mode=config.use_sequence)
         pd.DataFrame(predictions).to_csv(config.output_dir / "test_predictions.csv", index=False)
 
     summary = {
@@ -1511,6 +1550,18 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--device", type=str, default="auto")
     train_parser.add_argument("--resume", type=Path, help="Resume training from a checkpoint file.")
     train_parser.add_argument("--use_amp", action="store_true", help="Enable mixed precision training (CUDA only).")
+    train_parser.add_argument(
+        "--use_sequence",
+        type=str,
+        choices=["lstm", "3dcnn"],
+        help="Enable sequence modelling with LSTM or 3D CNN over frames.",
+    )
+    train_parser.add_argument(
+        "--sequence_len",
+        type=int,
+        default=4,
+        help="Sequence length (frames) when --use_sequence is set (default: 4).",
+    )
     train_parser.add_argument("--verbose", action="store_true")
 
     predict_parser = subparsers.add_parser("predict", help="Run inference with a trained checkpoint.")
@@ -1620,6 +1671,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             device=args.device,
             resume_from=args.resume,
             use_amp=args.use_amp,
+            use_sequence=args.use_sequence,
+            sequence_len=args.sequence_len,
         )
         train_pipeline(config, verbose=args.verbose)
     elif args.command == "predict":

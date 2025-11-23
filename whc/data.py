@@ -44,6 +44,18 @@ class Sample:
     image_bytes: Optional[bytes]
 
 
+@dataclass(frozen=True)
+class SequenceSample:
+    """Sequence of frames belonging to the same source (e.g., video) with a fixed length."""
+
+    frames: List[Sample]
+    label: int
+    label_name: str
+    split: str
+    source: str
+    video_name: str
+
+
 def _resolve_dataset_path(data_root: Path) -> Path:
     if data_root.is_file() and data_root.suffix == ".parquet":
         return data_root
@@ -230,6 +242,71 @@ class WHCDataset(Dataset):
 
 # Backwards compatibility alias.
 HSCDataset = WHCDataset
+
+
+def build_sequences(samples: Sequence[Sample], sequence_len: int) -> Dict[str, List[SequenceSample]]:
+    """Group samples into fixed-length sequences per split and video_name."""
+    if sequence_len <= 1:
+        raise ValueError("sequence_len must be >= 2 when using sequence models.")
+    grouped: Dict[str, Dict[str, List[Sample]]] = {}
+    for sample in samples:
+        grouped.setdefault(sample.split, {}).setdefault(sample.video_name, []).append(sample)
+
+    sequences: Dict[str, List[SequenceSample]] = {split: [] for split in ("train", "val", "test")}
+    for split, videos in grouped.items():
+        for _, frames in videos.items():
+            ordered = sorted(frames, key=lambda s: s.path)
+            if len(ordered) < sequence_len:
+                continue
+            for start in range(0, len(ordered) - sequence_len + 1):
+                window = ordered[start : start + sequence_len]
+                label = window[-1].label  # label from last frame
+                label_name = window[-1].label_name
+                sequences[split].append(
+                    SequenceSample(
+                        frames=window,
+                        label=label,
+                        label_name=label_name,
+                        split=split,
+                        source=window[-1].source,
+                        video_name=window[-1].video_name,
+                    )
+                )
+    return sequences
+
+
+class SequenceDataset(Dataset):
+    """Dataset that returns a stack of T frames as a single sample."""
+
+    def __init__(self, sequences: Sequence[SequenceSample], transform=None) -> None:
+        self.sequences = list(sequences)
+        self.transform = transform
+
+    def __len__(self) -> int:
+        return len(self.sequences)
+
+    def __getitem__(self, index: int):
+        seq = self.sequences[index]
+        images = []
+        for frame in seq.frames:
+            if frame.image_bytes is not None:
+                img = Image.open(io.BytesIO(frame.image_bytes)).convert("RGB")
+            elif frame.resolved_path is not None:
+                img = Image.open(frame.resolved_path).convert("RGB")
+            else:
+                raise FileNotFoundError(f"Image file not found for sequence frame {frame.path!r}.")
+            if self.transform is not None:
+                img = self.transform(img)
+            images.append(img)
+        stacked = torch.stack(images, dim=0)  # (T, C, H, W)
+        label = torch.tensor(float(seq.label), dtype=torch.float32)
+        return {
+            "image": stacked,
+            "label": label,
+            "video_name": seq.video_name,
+            "path": seq.frames[-1].path,
+            "base_frame": seq.frames[-1].base_frame,
+        }
 
 
 def create_dataloader(

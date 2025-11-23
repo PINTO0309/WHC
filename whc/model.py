@@ -24,6 +24,8 @@ class ModelConfig:
     rgb_to_yuv_to_y: bool = False
     rgb_to_lab: bool = False
     rgb_to_luv: bool = False
+    use_sequence: Optional[str] = None  # None, "lstm", or "3dcnn"
+    sequence_len: int = 1
 
 
 _RGB_TO_XYZ = torch.tensor(
@@ -625,3 +627,103 @@ class WHC(nn.Module):
 
 # Backwards compatibility alias.
 HSC = WHC
+
+
+class _ConvFeatureExtractor(nn.Module):
+    """Lightweight 2D feature extractor returning pooled embeddings."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        base = config.base_channels
+        num_blocks = max(1, config.num_blocks)
+        input_channels = 3
+        stem_layers = [
+            nn.Conv2d(input_channels, base, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(base),
+            nn.ReLU(inplace=True),
+        ]
+        channels = base
+        blocks = []
+        for idx in range(num_blocks):
+            stride = 2 if idx % 2 == 0 and idx > 0 else 1
+            next_channels = channels * (2 if stride == 2 else 1)
+            blocks.append(_SepConvBlock(channels, next_channels, stride))
+            channels = next_channels
+        self.stem = nn.Sequential(*stem_layers)
+        self.features = nn.Sequential(*blocks)
+        self.head = nn.AdaptiveAvgPool2d(1)
+        self.out_dim = channels
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.stem(x)
+        x = self.features(x)
+        x = self.head(x)
+        return x.flatten(1)  # (batch, dim)
+
+
+class SequenceLSTM(nn.Module):
+    """Sequence model: per-frame CNN + LSTM over embeddings."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        if config.sequence_len <= 1:
+            raise ValueError("SequenceLSTM requires sequence_len >= 2.")
+        self.sequence_len = int(config.sequence_len)
+        self.feature_extractor = _ConvFeatureExtractor(config)
+        hidden_dim = max(64, self.feature_extractor.out_dim)
+        self.lstm = nn.LSTM(
+            input_size=self.feature_extractor.out_dim,
+            hidden_size=hidden_dim,
+            num_layers=1,
+            batch_first=True,
+        )
+        self.fc = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, time, channels, height, width)
+        b, t, c, h, w = x.shape
+        x = x.view(b * t, c, h, w)
+        feats = self.feature_extractor(x)  # (b*t, d)
+        feats = feats.view(b, t, -1)
+        lstm_out, _ = self.lstm(feats)
+        last = lstm_out[:, -1, :]
+        logits = self.fc(last)
+        return logits.squeeze(1)
+
+
+class Sequence3DCNN(nn.Module):
+    """Simple 3D CNN for short hand-motion sequences."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        if config.sequence_len <= 1:
+            raise ValueError("Sequence3DCNN requires sequence_len >= 2.")
+        base = config.base_channels
+        self.sequence_len = int(config.sequence_len)
+        self.stem = nn.Sequential(
+            nn.Conv3d(3, base, kernel_size=(3, 3, 3), stride=(1, 2, 2), padding=1, bias=False),
+            nn.BatchNorm3d(base),
+            nn.ReLU(inplace=True),
+        )
+        self.block1 = nn.Sequential(
+            nn.Conv3d(base, base * 2, kernel_size=3, stride=(1, 2, 2), padding=1, bias=False),
+            nn.BatchNorm3d(base * 2),
+            nn.ReLU(inplace=True),
+        )
+        self.block2 = nn.Sequential(
+            nn.Conv3d(base * 2, base * 4, kernel_size=3, stride=(1, 2, 2), padding=1, bias=False),
+            nn.BatchNorm3d(base * 4),
+            nn.ReLU(inplace=True),
+        )
+        self.head = nn.AdaptiveAvgPool3d((1, 1, 1))
+        self.fc = nn.Linear(base * 4, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (batch, channels, time, height, width)
+        x = self.stem(x)
+        x = self.block1(x)
+        x = self.block2(x)
+        x = self.head(x)
+        x = x.flatten(1)
+        logits = self.fc(x)
+        return logits.squeeze(1)
