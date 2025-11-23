@@ -7,11 +7,11 @@ https://github.com/user-attachments/assets/c6b38d56-48b7-4609-bae1-f607c21ba423
 
 https://github.com/user-attachments/assets/7e9f8763-839f-46d2-98b1-320170f8ed10
 
-|Variant|Size|F1|CPU<br>inference<br>latency|ONNX|
-|:-:|:-:|:-:|:-:|:-:|
-|S|1.1 MB|0.9821|0.31 ms|[Download]()|
-|M|1.1 MB|0.| ms|[Download]()|
-|L|1.1 MB|0.| ms|[Download]()|
+|Variant|Size|Seq|F1|CPU<br>inference<br>latency|ONNX|
+|:-:|:-:|:-:|:-:|:-:|:-:|
+|S|1.1 MB|4|0.9821|0.31 ms|[Download]()|
+|M|1.1 MB|6|0.| ms|[Download]()|
+|L|1.1 MB|8|0.| ms|[Download]()|
 
 ## Data sample
 
