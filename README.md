@@ -7,11 +7,11 @@ https://github.com/user-attachments/assets/c6b38d56-48b7-4609-bae1-f607c21ba423
 
 https://github.com/user-attachments/assets/7e9f8763-839f-46d2-98b1-320170f8ed10
 
-|Variant|Size|Seq|F1|CPU<br>inference<br>latency|ONNX|
-|:-:|:-:|:-:|:-:|:-:|:-:|
-|S|1.1 MB|4|0.9821|0.31 ms|[Download](https://github.com/PINTO0309/WHC/releases/download/onnx/whc_seq_3dcnn_4x32x32.onnx)|
-|M|1.1 MB|6|0.9916|0.46 ms|[Download](https://github.com/PINTO0309/WHC/releases/download/onnx/whc_seq_3dcnn_6x32x32.onnx)|
-|L|1.1 MB|8|0.| ms|[Download]()|
+|Variant|Size|Seq|F1|CPU<br>inference<br>latency|ONNX<br>static seq|ONNX<br>dynamic seq|
+|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+|S|1.1 MB|4|0.9821|0.31 ms|[Download](https://github.com/PINTO0309/WHC/releases/download/onnx/whc_seq_3dcnn_4x32x32.onnx)|[Download](https://github.com/PINTO0309/WHC/releases/download/onnx/whc_seq_3dcnn_T4x32x32.onnx)|
+|M|1.1 MB|6|0.9916|0.46 ms|[Download](https://github.com/PINTO0309/WHC/releases/download/onnx/whc_seq_3dcnn_6x32x32.onnx)|[Download](https://github.com/PINTO0309/WHC/releases/download/onnx/whc_seq_3dcnn_T6x32x32.onnx)|
+|L|1.1 MB|8|0.9940|0.37 ms|[Download](https://github.com/PINTO0309/WHC/releases/download/onnx/whc_seq_3dcnn_8x32x32.onnx)|[Download](https://github.com/PINTO0309/WHC/releases/download/onnx/whc_seq_3dcnn_T8x32x32.onnx)|
 
 ## Data sample
 
