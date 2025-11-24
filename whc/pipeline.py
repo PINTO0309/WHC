@@ -1410,6 +1410,7 @@ def export_to_onnx(
     output_path: Path,
     opset: int = 17,
     device_spec: str = "auto",
+    dynamic: bool = False,
 ) -> None:
     device = _resolve_device(device_spec)
     checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -1459,10 +1460,11 @@ def export_to_onnx(
     input_name = "images"
     output_name = "prob_waving_hand"
     dynamic_axes = {input_name: {0: "batch"}, output_name: {0: "batch"}}
-    if use_sequence == "lstm":
-        dynamic_axes[input_name][1] = "sequence"  # (N, T, C, H, W)
-    elif use_sequence == "3dcnn":
-        dynamic_axes[input_name][2] = "sequence"  # (N, C, T, H, W)
+    if dynamic:
+        if use_sequence == "lstm":
+            dynamic_axes[input_name][1] = "sequence"  # (N, T, C, H, W)
+        elif use_sequence == "3dcnn":
+            dynamic_axes[input_name][2] = "sequence"  # (N, C, T, H, W)
     torch.onnx.export(
         export_model,
         dummy,
@@ -1645,6 +1647,7 @@ def build_parser() -> argparse.ArgumentParser:
     onnx_parser.add_argument("--output", type=Path, required=True)
     onnx_parser.add_argument("--opset", type=int, default=17)
     onnx_parser.add_argument("--device", type=str, default="auto")
+    onnx_parser.add_argument("--dynamic", action="store_true", help="Enable dynamic sequence length axes for sequence models.")
 
     return parser
 
@@ -1713,6 +1716,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             detector_provider=args.detector_provider,
         )
     elif args.command == "exportonnx":
-        export_to_onnx(args.checkpoint, args.output, opset=args.opset, device_spec=args.device)
+        export_to_onnx(args.checkpoint, args.output, opset=args.opset, device_spec=args.device, dynamic=args.dynamic)
     else:
         parser.error(f"Unknown command: {args.command}")
